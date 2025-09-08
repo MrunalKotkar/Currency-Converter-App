@@ -15,7 +15,7 @@ This project is a **hands-on exploration of AWS three-tier architecture**, where
 
 ## 🏗️ Architecture (3-tier)
 
-[ Amplify Frontend ] --> [ API Gateway ] --> [ Lambda Function ] --> [ DynamoDB ]
+![Architecture Diagram](docs/architecture-diagram.png)
 
 ## ✨ Features
 - Fetches and caches currency rates in DynamoDB.
