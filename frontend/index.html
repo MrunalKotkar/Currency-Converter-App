@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Currency Converter</title>
+
+  <!-- Bootstrap 5 CSS -->
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+    integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+    crossorigin="anonymous"
+  />
+
+  <style>
+    :root { --card-radius: 1.1rem; }
+    body {
+      background: linear-gradient(180deg, #f8fafc, #eef2f7);
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .app-card {
+      border: 1px solid rgba(0,0,0,.06);
+      border-radius: var(--card-radius);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, .06);
+    }
+    .brand-badge {
+      font-weight: 700;
+      letter-spacing: .4px;
+      background: #0d6efd;
+      color: #fff;
+      border-radius: 999px;
+      padding: .35rem .8rem;
+      font-size: .9rem;
+    }
+    .muted { color: #6b7280; }
+    .result-badge { font-size: 1.1rem; }
+  </style>
+</head>
+<body>
+  <div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <span class="brand-badge">FX Converter</span>
+      <small class="muted">Powered by AWS (API Gateway • Lambda • DynamoDB)</small>
+    </div>
+
+    <div class="row justify-content-center">
+      <div class="col-12 col-md-8 col-lg-6">
+        <div class="app-card bg-white p-4 p-md-5">
+          <h1 class="h4 mb-4">Convert currencies</h1>
+
+          <!-- Inputs -->
+          <form id="convert-form" class="row g-3">
+            <div class="col-12 col-md-5">
+              <label class="form-label">From</label>
+              <select id="fromCur" class="form-select" required></select>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end justify-content-center">
+              <button id="swapBtn" type="button" class="btn btn-outline-secondary w-100" title="Swap">
+                ⇄
+              </button>
+            </div>
+            <div class="col-12 col-md-5">
+              <label class="form-label">To</label>
+              <select id="toCur" class="form-select" required></select>
+            </div>
+            <div class="col-12">
+              <label class="form-label">Amount</label>
+              <div class="input-group">
+                <input id="amount" type="number" step="0.01" min="0" class="form-control" placeholder="e.g. 100" required />
+                <button id="convertBtn" type="submit" class="btn btn-primary">
+                  <span class="btn-text">Convert</span>
+                  <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                </button>
+              </div>
+              <div class="form-text">We’ll use your cached rates from DynamoDB via Lambda.</div>
+            </div>
+          </form>
+
+          <!-- Alerts -->
+          <div id="alert" class="alert d-none mt-4" role="alert"></div>
+
+          <!-- Result card -->
+          <div id="resultCard" class="mt-4 d-none">
+            <div class="card border-0">
+              <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                  <div>
+                    <div class="text-uppercase small text-muted fw-semibold" id="pairLabel">USD ➜ EUR</div>
+                    <div class="fs-4 fw-bold" id="resultText">—</div>
+                  </div>
+                  <span class="badge text-bg-light result-badge" id="rateBadge">rate —</span>
+                </div>
+                <div class="mt-2 small text-muted" id="metaText">—</div>
+              </div>
+            </div>
+          </div>
+
+          <hr class="my-4" />
+
+          <!-- Tiny helper: last 3 conversions (in-memory) -->
+          <div>
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h2 class="h6 mb-0">Recent (this session)</h2>
+              <button id="clearRecent" class="btn btn-sm btn-outline-secondary">Clear</button>
+            </div>
+            <ul id="recentList" class="list-group list-group-flush small"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (for nice buttons; not required for core logic) -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz9"
+    crossorigin="anonymous"></script>
+
+  <script>
+    // ======= CONFIG =======
+    // Replace with your API Gateway base URL, e.g.:
+    //   https://abc123.execute-api.us-east-1.amazonaws.com
+    const API_BASE = "https://ew5bnbkjwa.execute-api.us-west-1.amazonaws.com/dev";
+
+    // Minimal ISO-4217 list (add more if you like)
+    const CURRENCIES = [
+      "USD","EUR","GBP","JPY","AUD","CAD","CHF","CNY","HKD","INR","NZD","SEK","NOK","SGD","ZAR","MXN","BRL","AED","SAR","TRY"
+    ];
+
+    // ======= DOM =======
+    const fromCur = document.getElementById("fromCur");
+    const toCur = document.getElementById("toCur");
+    const amount = document.getElementById("amount");
+    const convertForm = document.getElementById("convert-form");
+    const convertBtn = document.getElementById("convertBtn");
+    const swapBtn = document.getElementById("swapBtn");
+    const alertBox = document.getElementById("alert");
+    const resultCard = document.getElementById("resultCard");
+    const resultText = document.getElementById("resultText");
+    const rateBadge = document.getElementById("rateBadge");
+    const pairLabel = document.getElementById("pairLabel");
+    const metaText = document.getElementById("metaText");
+    const recentList = document.getElementById("recentList");
+    const clearRecentBtn = document.getElementById("clearRecent");
+    const spinner = convertBtn.querySelector(".spinner-border");
+    const btnText = convertBtn.querySelector(".btn-text");
+
+    // ======= Helpers =======
+    function populateSelect(el, defaultValue) {
+      el.innerHTML = CURRENCIES.map(c => `<option value="${c}">${c}</option>`).join("");
+      el.value = defaultValue;
+    }
+
+    function showAlert(type, msg) {
+      alertBox.className = `alert alert-${type}`;
+      alertBox.textContent = msg;
+      alertBox.classList.remove("d-none");
+    }
+    function hideAlert() { alertBox.classList.add("d-none"); }
+
+    function setLoading(isLoading) {
+      convertBtn.disabled = isLoading;
+      spinner.classList.toggle("d-none", !isLoading);
+      btnText.classList.toggle("d-none", isLoading);
+    }
+
+    function nfCurrency(val, code) {
+      try {
+        return new Intl.NumberFormat(undefined, { style: "currency", currency: code }).format(val);
+      } catch {
+        return Number(val).toLocaleString(undefined, { maximumFractionDigits: 4 });
+      }
+    }
+
+    function pushRecent(entry) {
+      const items = JSON.parse(sessionStorage.getItem("recent") || "[]");
+      items.unshift(entry);
+      sessionStorage.setItem("recent", JSON.stringify(items.slice(0, 3)));
+      renderRecent();
+    }
+
+    function renderRecent() {
+      const items = JSON.parse(sessionStorage.getItem("recent") || "[]");
+      recentList.innerHTML = "";
+      if (!items.length) {
+        recentList.innerHTML = `<li class="list-group-item">No recent conversions.</li>`;
+        return;
+      }
+      items.forEach(e => {
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.innerHTML = `
+          <span>${e.amount} ${e.from} → ${e.to}</span>
+          <span class="text-muted">${e.result} (${e.rate})</span>
+        `;
+        recentList.appendChild(li);
+      });
+    }
+
+    // ======= App init =======
+    populateSelect(fromCur, "USD");
+    populateSelect(toCur, "EUR");
+    amount.value = "100";
+    renderRecent();
+
+    swapBtn.addEventListener("click", () => {
+      const f = fromCur.value;
+      fromCur.value = toCur.value;
+      toCur.value = f;
+    });
+
+    clearRecentBtn.addEventListener("click", () => {
+      sessionStorage.removeItem("recent");
+      renderRecent();
+    });
+
+    // ======= Submit =======
+    convertForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      hideAlert();
+      resultCard.classList.add("d-none");
+
+      if (!API_BASE || API_BASE.includes("YOUR_API_BASE")) {
+        showAlert("warning", "Please set API_BASE in the HTML to your API Gateway URL.");
+        return;
+      }
+
+      const from = fromCur.value.trim().toUpperCase();
+      const to = toCur.value.trim().toUpperCase();
+      const amt = Number(amount.value);
+
+      if (!from || !to || isNaN(amt) || amt < 0) {
+        showAlert("danger", "Please enter valid currencies and a non-negative amount.");
+        return;
+      }
+
+      // Helper: join base + path safely (keeps stage segments)
+  function buildUrl(path) {
+    // Remove trailing slashes on base and leading slashes on path, then join
+    const base = API_BASE.replace(/\/+$/, "");
+    const p    = String(path).replace(/^\/+/, "");
+    return `${base}/${p}`;
+  }
+
+  // ...inside your submit handler:
+  const url = new URL(buildUrl("convert"));
+  url.searchParams.set("from", from);
+  url.searchParams.set("to", to);
+  url.searchParams.set("amount", String(amt));
+
+      try {
+        setLoading(true);
+        const res = await fetch(url.toString(), { method: "GET" });
+        const data = await res.json();
+
+        if (!res.ok) {
+          const message = data?.error || res.statusText || "Request failed";
+          showAlert("danger", message);
+          return;
+        }
+
+        // Success
+        pairLabel.textContent = `${from} ➜ ${to}`;
+        resultText.textContent = `${nfCurrency(data.result, to)}`
+        rateBadge.textContent = `rate ${data.rate}`;
+        metaText.textContent = [
+          data.asOf ? `as of ${data.asOf}` : null,
+          data.provenance ? `via ${data.provenance}` : null
+        ].filter(Boolean).join(" • ");
+
+        resultCard.classList.remove("d-none");
+
+        pushRecent({
+          from, to,
+          amount: `${amt}`,
+          result: `${data.result}`,
+          rate: `${data.rate}`
+        });
+
+      } catch (err) {
+        showAlert("danger", "Network error. Check your API URL and CORS.");
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>

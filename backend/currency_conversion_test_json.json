@@ -1,0 +1,15 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /convert",
+  "rawPath": "/convert",
+  "rawQueryString": "from=EUR&to=USD&amount=50",
+  "queryStringParameters": {
+    "from": "EUR",
+    "to": "USD",
+    "amount": "50"
+  },
+  "requestContext": {
+    "http": { "method": "GET", "path": "/convert" },
+    "authorizer": { "jwt": { "claims": {} } }
+  }
+}
